@@ -1,4 +1,4 @@
-/* Play mp3 file by audio pipeline
+ /* Play mp3 file by audio pipeline
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
