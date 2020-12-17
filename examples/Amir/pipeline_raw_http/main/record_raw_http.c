@@ -28,6 +28,7 @@
 #include "periph_button.h"
 #include "periph_wifi.h"
 #include "filter_resample.h"
+#include "fatfs_stream.h"
 #include "input_key_service.h"
 
 static const char *TAG = "REC_RAW_HTTP";
@@ -37,6 +38,7 @@ static const char *TAG = "REC_RAW_HTTP";
 static audio_pipeline_handle_t pipeline;
 static EventGroupHandle_t EXIT_FLAG;
 
+static int streaming_state = 0;
 esp_err_t _http_stream_event_handle(http_stream_event_msg_t *msg)
 {
     esp_http_client_handle_t http = (esp_http_client_handle_t)msg->http_client;
@@ -105,20 +107,25 @@ static esp_err_t input_key_service_cb(periph_service_handle_t handle, periph_ser
                 xEventGroupSetBits(EXIT_FLAG, DEMO_EXIT_BIT);
                 break;
             case INPUT_KEY_USER_ID_REC:
-                ESP_LOGI(TAG, "[ * ] [Rec] input key event, resuming pipeline ...");
-                audio_element_set_uri(http_stream_writer, CONFIG_SERVER_URI);
-                audio_pipeline_run(pipeline);
+                if(streaming_state==0){
+                    streaming_state = 1;
+                    ESP_LOGI(TAG, "[ * ] [Rec] input key event, resuming pipeline ...");
+                    audio_element_set_uri(http_stream_writer, CONFIG_SERVER_URI);
+                    audio_pipeline_run(pipeline);
+                }else{
+                    ESP_LOGI(TAG, "[ * ] [Rec] input key event, last streaming is running ...");
+                }
                 break;
         }
     } else if (evt->type == INPUT_KEY_SERVICE_ACTION_CLICK_RELEASE || evt->type == INPUT_KEY_SERVICE_ACTION_PRESS_RELEASE) {
         switch ((int)evt->data) {
             case INPUT_KEY_USER_ID_REC:
                 ESP_LOGI(TAG, "[ * ] [Rec] key released, stop pipeline ...");
-                audio_pipeline_stop(pipeline);
+                /*audio_pipeline_stop(pipeline);
                 audio_pipeline_wait_for_stop(pipeline);
                 audio_pipeline_stop(pipeline);
                 audio_pipeline_wait_for_stop(pipeline);
-                audio_pipeline_terminate(pipeline);
+                audio_pipeline_terminate(pipeline);*/
                 break;
         }
     }
@@ -128,7 +135,7 @@ static esp_err_t input_key_service_cb(periph_service_handle_t handle, periph_ser
 
 void app_main(void)
 {
-    audio_element_handle_t http_stream_writer, i2s_stream_reader;
+    audio_element_handle_t http_stream_writer, fatfs_stream_reader;
 
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
@@ -144,7 +151,7 @@ void app_main(void)
     }
     tcpip_adapter_init();
 
-    ESP_LOGI(TAG, "[ 1 ] Initialize Button Peripheral & Connect to wifi network");
+    ESP_LOGI(TAG, "[ 1 ] Initialize Button Peripheral & Connect to wifi network & SDCARD");
     // Initialize peripherals management
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
@@ -159,11 +166,14 @@ void app_main(void)
     esp_periph_start(set, wifi_handle);
     periph_wifi_wait_for_connected(wifi_handle, portMAX_DELAY);
 
-    ESP_LOGI(TAG, "[ 2 ] Start codec chip");
-    audio_board_handle_t board_handle = audio_board_init();
-    audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_ENCODE, AUDIO_HAL_CTRL_START);
+    // Initialize SD Card peripheral
+    audio_board_sdcard_init(set);
 
-    ESP_LOGI(TAG, "[3.0] Create audio pipeline for recording");
+    /*ESP_LOGI(TAG, "[ 2 ] Start codec chip");
+    audio_board_handle_t board_handle = audio_board_init();
+    audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_ENCODE, AUDIO_HAL_CTRL_START);*/
+
+    ESP_LOGI(TAG, "[3.0] Create audio pipeline for reading from SDCARD");
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
     pipeline = audio_pipeline_init(&pipeline_cfg);
     mem_assert(pipeline);
@@ -175,21 +185,29 @@ void app_main(void)
     http_cfg.event_handle = _http_stream_event_handle;
     http_stream_writer = http_stream_init(&http_cfg);
 
-    ESP_LOGI(TAG, "[3.2] Create i2s stream to read audio data from codec chip");
+    /*ESP_LOGI(TAG, "[3.2] Create i2s stream to read audio data from codec chip");
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_READER;
 #if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
     i2s_cfg.i2s_port = 1;
 #endif
-    i2s_stream_reader = i2s_stream_init(&i2s_cfg);
+    i2s_stream_reader = i2s_stream_init(&i2s_cfg);*/
+
+    ESP_LOGI(TAG, "[3.1] Create fatfs stream to read data from sdcard");
+    fatfs_stream_cfg_t fatfs_cfg = FATFS_STREAM_CFG_DEFAULT();
+    fatfs_cfg.type = AUDIO_STREAM_READER;
+    fatfs_stream_reader = fatfs_stream_init(&fatfs_cfg);
 
     ESP_LOGI(TAG, "[3.3] Register all elements to audio pipeline");
-    audio_pipeline_register(pipeline, i2s_stream_reader, "i2s");
+    audio_pipeline_register(pipeline, fatfs_stream_reader, "fatfs");
     audio_pipeline_register(pipeline, http_stream_writer, "http");
 
-    ESP_LOGI(TAG, "[3.4] Link it together [codec_chip]-->i2s_stream->http_stream-->[http_server]");
-    const char *link_tag[2] = {"i2s", "http"};
+    ESP_LOGI(TAG, "[3.4] Link it together fatfs_stream->http_stream-->[http_server]");
+    const char *link_tag[2] = {"fatfs", "http"};
     audio_pipeline_link(pipeline, &link_tag[0], 2);
+
+    ESP_LOGI(TAG, "[3.6] Set up  uri (file as fatfs_stream)");
+    audio_element_set_uri(fatfs_stream_reader, "/sdcard/test.wav");
 
     // Initialize Button peripheral
     audio_board_key_init(set);
@@ -200,10 +218,45 @@ void app_main(void)
     input_key_service_add_key(input_ser, input_key_info, INPUT_KEY_NUM);
     periph_service_set_callback(input_ser, input_key_service_cb, (void *)http_stream_writer);
 
-    i2s_stream_set_clk(i2s_stream_reader, 16000, 16, 2);
+    //i2s_stream_set_clk(i2s_stream_reader, 16000, 16, 2);
 
-    ESP_LOGI(TAG, "[ 4 ] Press [Rec] button to record, Press [Mode] to exit");
-    xEventGroupWaitBits(EXIT_FLAG, DEMO_EXIT_BIT, true, false, portMAX_DELAY);
+    ESP_LOGI(TAG, "[ 4 ] Press [Rec] button to start streaming, Press [Mode] to exit");
+
+    ESP_LOGI(TAG, "[ 4 ] Set up  event listener");
+    audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+    audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
+
+    ESP_LOGI(TAG, "[4.1] Listening event from all elements of pipeline");
+    audio_pipeline_set_listener(pipeline, evt);
+
+    ESP_LOGI(TAG, "[4.2] Listening event from peripherals");
+    audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
+
+    //xEventGroupWaitBits(EXIT_FLAG, DEMO_EXIT_BIT, true, false, portMAX_DELAY);
+
+    while(1){
+
+        audio_event_iface_msg_t msg;
+        esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
+            continue;
+        }
+
+        /* Stop when the last pipeline element (http_stream_writer in this case) receives stop event */
+        if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *) http_stream_writer
+            && msg.cmd == AEL_MSG_CMD_REPORT_STATUS
+            && (((int)msg.data == AEL_STATUS_STATE_STOPPED) || ((int)msg.data == AEL_STATUS_STATE_FINISHED))) {
+            ESP_LOGW(TAG, "[ * ] Stop event received");
+            ESP_LOGW(TAG, "[ * ] Press REC again!");
+            audio_pipeline_stop(pipeline);
+            audio_pipeline_wait_for_stop(pipeline);
+            audio_pipeline_stop(pipeline);
+            audio_pipeline_wait_for_stop(pipeline);
+            audio_pipeline_terminate(pipeline);
+            streaming_state = 0;
+        }
+    }
 
     ESP_LOGI(TAG, "[ 5 ] Stop audio_pipeline");
     audio_pipeline_stop(pipeline);
@@ -211,7 +264,7 @@ void app_main(void)
     audio_pipeline_terminate(pipeline);
 
     audio_pipeline_unregister(pipeline, http_stream_writer);
-    audio_pipeline_unregister(pipeline, i2s_stream_reader);
+    audio_pipeline_unregister(pipeline, fatfs_stream_reader);
 
     /* Terminal the pipeline before removing the listener */
     audio_pipeline_remove_listener(pipeline);
@@ -222,6 +275,6 @@ void app_main(void)
     /* Release all resources */
     audio_pipeline_deinit(pipeline);
     audio_element_deinit(http_stream_writer);
-    audio_element_deinit(i2s_stream_reader);
+    audio_element_deinit(fatfs_stream_reader);
     esp_periph_set_destroy(set);
 }
