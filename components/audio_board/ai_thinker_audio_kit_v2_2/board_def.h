@@ -44,19 +44,24 @@
 #define GREEN_LED_GPIO GPIO_NUM_22
 #define BLUE_LED_GPIO GPIO_NUM_19
 
-#define BUTTON_REC_GPIO 	GPIO_NUM_36
+/*#define BUTTON_REC_GPIO 	GPIO_NUM_36
 #define BUTTON_MODE_GPIO 	GPIO_NUM_13
 #define BUTTON_SET_GPIO 	GPIO_SEL_19
 #define BUTTON_PLAY_GPIO 	GPIO_SEL_23
 #define BUTTON_VOLUP_GPIO 	GPIO_SEL_18
 #define BUTTON_VOLDWN_GPIO	GPIO_SEL_5
-
+*/
 #define BUTTON_VOLUP_ID           0
 #define BUTTON_VOLDOWN_ID         1
 #define BUTTON_SET_ID             2
 #define BUTTON_PLAY_ID            3
 #define BUTTON_MODE_ID            4
 #define BUTTON_REC_ID             5
+
+
+/*#define BUTTON_REC_ID GPIO_NUM_36
+#define BUTTON_MODE_ID GPIO_NUM_13
+*/
 
 #define TOUCH_SEL_SET GPIO_SEL_19
 #define TOUCH_SEL_PLAY GPIO_SEL_23
