@@ -26,12 +26,13 @@ class Handler(SimpleHTTPServer.SimpleHTTPRequestHandler):
     def _write_wav(self, data, rates, bits, ch):
         t = datetime.datetime.utcnow()
         time = t.strftime('%Y%m%dT%H%M%SZ')
-        filename = str.format('{}_{}_{}_{}.wav', time, rates, bits, ch)
+        filename = str.format('{}_{}_{}_{}.wav', time, 0,0,0)#rates, bits, ch)
 
-        wavfile = wave.open(filename, 'wb')
-        wavfile.setparams((ch, bits/8, rates, 0, 'NONE', 'NONE'))
-        wavfile.writeframes(bytearray(data))
-        wavfile.close()
+        wavfile = open(filename,mode='bx')#wave.open(filename, 'wb')
+        #wavfile.setparams((ch, bits/8, rates, 0, 'NONE', 'NONE'))
+        #wavfile.writeframes(bytearray(data))
+        #wavfile.close()
+        wavfile.write(bytearray(data))
         return filename
 
     def do_POST(self):
@@ -41,13 +42,12 @@ class Handler(SimpleHTTPServer.SimpleHTTPRequestHandler):
         sample_rates = 0
         bits = 0
         channel = 0
-        if (request_file_path == 'upload'
-            and self.headers.get('Transfer-Encoding', '').lower() == 'chunked'):
+        if (request_file_path == 'upload' and self.headers.get('Transfer-Encoding', '').lower() == 'chunked'):
             data = []
-            sample_rates = self.headers.get('x-audio-sample-rates', '').lower()
-            bits = self.headers.get('x-audio-bits', '').lower()
-            channel = self.headers.get('x-audio-channel', '').lower()
-            sample_rates = self.headers.get('x-audio-sample-rates', '').lower()
+            sample_rates = 16000#self.headers.get('x-audio-sample-rates', '').lower()
+            bits = 16#self.headers.get('x-audio-bits', '').lower()
+            channel = 1#self.headers.get('x-audio-channel', '').lower()
+            sample_rates = 16000#self.headers.get('x-audio-sample-rates', '').lower()
 
             print("Audio information, sample rates: {}, bits: {}, channel(s): {}".format(sample_rates, bits, channel))
             # https://stackoverflow.com/questions/24500752/how-can-i-read-exactly-one-response-chunk-with-pythons-http-client
