@@ -44,10 +44,20 @@
 #define GREEN_LED_GPIO GPIO_NUM_22
 #define BLUE_LED_GPIO GPIO_NUM_19
 
-#define BUTTON_REC_ID GPIO_NUM_36
-#define BUTTON_MODE_ID GPIO_NUM_13
+#define BUTTON_REC_GPIO 	GPIO_NUM_36
+#define BUTTON_MODE_GPIO 	GPIO_NUM_13
+#define BUTTON_SET_GPIO 	GPIO_SEL_19
+#define BUTTON_PLAY_GPIO 	GPIO_SEL_23
+#define BUTTON_VOLUP_GPIO 	GPIO_SEL_18
+#define BUTTON_VOLDWN_GPIO	GPIO_SEL_5
 
-/* Touch pad related */
+#define BUTTON_VOLUP_ID           0
+#define BUTTON_VOLDOWN_ID         1
+#define BUTTON_SET_ID             2
+#define BUTTON_PLAY_ID            3
+#define BUTTON_MODE_ID            4
+#define BUTTON_REC_ID             5
+
 #define TOUCH_SEL_SET GPIO_SEL_19
 #define TOUCH_SEL_PLAY GPIO_SEL_23
 #define TOUCH_SEL_VOLUP GPIO_SEL_18
@@ -71,5 +81,40 @@ extern audio_hal_func_t AUDIO_CODEC_AC101_CODEC_HANDLE;
         .bits = AUDIO_HAL_BIT_LENGTH_16BITS, \
     },                                       \
 };
+
+#define INPUT_KEY_NUM            6
+
+#define INPUT_KEY_DEFAULT_INFO() {                      \
+     {                                                  \
+        .type = PERIPH_ID_BUTTON,                       \
+        .user_id = INPUT_KEY_USER_ID_REC,               \
+        .act_id = BUTTON_REC_ID,                        \
+    },                                                  \
+    {                                                   \
+        .type = PERIPH_ID_BUTTON,                       \
+        .user_id = INPUT_KEY_USER_ID_MODE,              \
+        .act_id = BUTTON_MODE_ID,                       \
+    },                                                  \
+    {                                                   \
+        .type = PERIPH_ID_BUTTON,                        \
+        .user_id = INPUT_KEY_USER_ID_SET,               \
+        .act_id = BUTTON_SET_ID,                        \
+    },                                                  \
+    {                                                   \
+        .type = PERIPH_ID_BUTTON,                        \
+        .user_id = INPUT_KEY_USER_ID_PLAY,              \
+        .act_id = BUTTON_PLAY_ID,                       \
+    },                                                  \
+    {                                                   \
+        .type = PERIPH_ID_BUTTON,                        \
+        .user_id = INPUT_KEY_USER_ID_VOLUP,             \
+        .act_id = BUTTON_VOLUP_ID,                      \
+    },                                                  \
+    {                                                   \
+        .type = PERIPH_ID_BUTTON,                        \
+        .user_id = INPUT_KEY_USER_ID_VOLDOWN,           \
+        .act_id = BUTTON_VOLDOWN_ID,                    \
+    }                                                   \
+}
 
 #endif
