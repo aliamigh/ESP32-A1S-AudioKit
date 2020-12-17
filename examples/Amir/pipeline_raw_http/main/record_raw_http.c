@@ -83,9 +83,9 @@ esp_err_t _http_stream_event_handle(http_stream_event_msg_t *msg)
 
     if (msg->event_id == HTTP_STREAM_FINISH_REQUEST) {
         ESP_LOGI(TAG, "[ + ] HTTP client HTTP_STREAM_FINISH_REQUEST");
-        char *buf = calloc(1, 64);
+        char *buf = calloc(1, 254);
         assert(buf);
-        int read_len = esp_http_client_read(http, buf, 64);
+        int read_len = esp_http_client_read(http, buf, 254);
         if (read_len <= 0) {
             free(buf);
             return ESP_FAIL;
@@ -254,12 +254,13 @@ void app_main(void)
             && (((int)msg.data == AEL_STATUS_STATE_STOPPED) || ((int)msg.data == AEL_STATUS_STATE_FINISHED))) {
             ESP_LOGW(TAG, "[ * ] Stop event received");
             ESP_LOGW(TAG, "[ * ] Press REC again!");
-            audio_pipeline_stop(pipeline);
+            /*audio_pipeline_stop(pipeline);
             audio_pipeline_wait_for_stop(pipeline);
             audio_pipeline_stop(pipeline);
             audio_pipeline_wait_for_stop(pipeline);
             audio_pipeline_terminate(pipeline);
-            streaming_state = 0;
+            streaming_state = 0;*/
+	    break;
         }
     }
 
