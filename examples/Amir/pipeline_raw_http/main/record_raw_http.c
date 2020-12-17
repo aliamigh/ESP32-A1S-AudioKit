@@ -222,6 +222,10 @@ void app_main(void)
     //i2s_stream_set_clk(i2s_stream_reader, 16000, 16, 2);
 
     ESP_LOGI(TAG, "[ 4 ] Press [Rec] button to start streaming, Press [Mode] to exit");
+    ESP_LOGI(TAG, "[ 4 ] ByPass");
+    streaming_state = 1;
+    audio_element_set_uri(http_stream_writer, CONFIG_SERVER_URI);
+    audio_pipeline_run(pipeline);
 
     ESP_LOGI(TAG, "[ 4 ] Set up  event listener");
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
