@@ -1,12 +1,3 @@
-/* Record WAV file to SD Card
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -33,115 +24,223 @@
 
 static const char *TAG = "REC_RAW_HTTP";
 
-#define DEMO_EXIT_BIT (BIT0)
+#define HTTP_BOUNDARY "MY_BOUNDARYY"
+#define FILE_NAME     "ahang.wav"
+#define HTTP_BUFFER_SIZE 35090
 
-static audio_pipeline_handle_t pipeline;
-static EventGroupHandle_t EXIT_FLAG;
+char fileNameWithDir[100];
+char keyHeader[100] = "";
+char requestHead[200] = "";
+char tail[50] = "";
+//Send file parts
+char buffer[HTTP_BUFFER_SIZE]="";
 
-static char streaming_state = 0;
-esp_err_t _http_stream_event_handle(http_stream_event_msg_t *msg)
+static bool sendFile(esp_http_client_handle_t client, const char *fileName)
 {
-    esp_http_client_handle_t http = (esp_http_client_handle_t)msg->http_client;
-    char len_buf[16];
-    static int total_write = 0;
+    esp_err_t err;
+    FILE *file;
 
-    if (msg->event_id == HTTP_STREAM_PRE_REQUEST) {
-        // set header
-        ESP_LOGI(TAG, "[ + ] HTTP client HTTP_STREAM_PRE_REQUEST, lenght=%d", msg->buffer_len);
-        /*esp_http_client_set_header(http, "x-audio-sample-rates", "16000");
-        esp_http_client_set_header(http, "x-audio-bits", "16");
-        esp_http_client_set_header(http, "x-audio-channel", "2");*/
-        esp_http_client_set_header(http, "", "");//empty
-        total_write = 0;
-        return ESP_OK;
+    snprintf(fileNameWithDir, sizeof(fileNameWithDir), "/sdcard/%s", fileName);
+    //file = SD_open(fileNameWithDir, "rb");
+    file = fopen(fileNameWithDir, "rb");
+    if(!file)
+    {
+        ESP_LOGW(TAG, "Could not open file to send through wifi");
+        return false;
+    }
+    unsigned int fileLenght = 0;
+    struct stat st;
+    if(stat(fileNameWithDir, &st) == 0){
+        fileLenght = st.st_size;
+	ESP_LOGI(TAG, "length: %d", fileLenght);
+    }
+    //return true;
+    time_t fileTransferStart = 0;
+    time(&fileTransferStart);
+
+    char contentType[] = "audio/wav";
+    //=============================================================================================
+    //key header
+    /*strcat(keyHeader, "--");
+    strcat(keyHeader, HTTP_BOUNDARY);
+    strcat(keyHeader, "\r\n");
+
+    strcat(keyHeader, "Content-Disposition: form-data; name=\"key\"\r\n\r\n");
+    strcat(keyHeader, "${filename}\r\n");
+    ESP_LOGI(TAG, "keyHeader: %s", keyHeader);*/
+
+    //request header
+    strcat(requestHead, "--");
+    strcat(requestHead, HTTP_BOUNDARY);
+    strcat(requestHead, "\r\n");
+    strcat(requestHead, "Content-Disposition: form-data; name=\"file\"; filename=\"");
+    strcat(requestHead, fileName);
+    strcat(requestHead, "\"\r\n");
+    strcat(requestHead, "Content-Type: ");
+    strcat(requestHead, contentType);
+    strcat(requestHead, "\r\n\r\n");
+    ESP_LOGI(TAG, "requestHead: %s", requestHead);
+
+    //request tail
+    strcat(tail, "\r\n--");
+    strcat(tail, HTTP_BOUNDARY);
+    strcat(tail, "--\r\n\r\n");
+    ESP_LOGI(TAG, "tail: %s", tail);
+
+    //Set Content-Length
+    int contentLength = strlen(requestHead) + fileLenght + strlen(tail);
+    //HTTP_BUFFER_SIZE=contentLength;
+    ESP_LOGI(TAG, "length: %d", contentLength);
+    char lengthStr[10]="";
+    sprintf(lengthStr, "%i", contentLength);
+    ESP_LOGI(TAG,"%s", lengthStr);
+    err = esp_http_client_set_header(client, "Content-Length", lengthStr);
+
+    //=============================================================================================
+
+    err = esp_http_client_open(client, HTTP_BUFFER_SIZE);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
     }
 
-    if (msg->event_id == HTTP_STREAM_ON_REQUEST) {
-        // write data
-        int wlen = sprintf(len_buf, "%x\r\n", msg->buffer_len);
-        if (esp_http_client_write(http, len_buf, wlen) <= 0) {
-            return ESP_FAIL;
+    ESP_LOGI(TAG, "client connection open");
+
+    //ESP_LOGI(TAG, "keyHeader:\t%d", esp_http_client_write(client, keyHeader, strlen(keyHeader)));
+    ESP_LOGI(TAG, "requestHead:\t%d", esp_http_client_write(client, requestHead, strlen(requestHead)));
+
+    unsigned int fileProgress = 0;
+    int length = 1;
+    while(length)
+    {
+        length = fread(buffer, sizeof(char), HTTP_BUFFER_SIZE, file);
+        if(length)
+        {
+            int wret = esp_http_client_write(client, buffer, length);
+            ESP_LOGI(TAG, "write file:\t%d/%d", wret, length);
+            if(wret < 0)
+                 return false;
+
+            fileProgress += wret;
+            //ESP_LOGI(TAG, "%.*s", length, buffer);
+            time_t now;
+            time(&now);
+            if((float)(now - fileTransferStart) / 1024 > 0)
+                ESP_LOGI(TAG, "%u/%u bytes sent total %.02f KiB/s", fileProgress, fileLenght, fileProgress  / (float)(now - fileTransferStart) / 1024);
         }
-        if (esp_http_client_write(http, msg->buffer, msg->buffer_len) <= 0) {
-            return ESP_FAIL;
-        }
-        if (esp_http_client_write(http, "\r\n", 2) <= 0) {
-            return ESP_FAIL;
-        }
-        total_write += msg->buffer_len;
-        printf("\033[A\33[2K\rTotal bytes written: %d\n", total_write);
-        return msg->buffer_len;
+    }
+    fclose(file);
+    //finish Multipart request
+    ESP_LOGI(TAG, "tail:\t%d", esp_http_client_write(client, tail, strlen(tail)));
+
+    //Get response
+    ESP_LOGI(TAG, "fetch_headers:\t%d", esp_http_client_fetch_headers(client));
+    ESP_LOGI(TAG, "chunked:\t%d", esp_http_client_is_chunked_response(client));
+
+    int responseLength = esp_http_client_get_content_length(client);
+    ESP_LOGI(TAG, "responseLength:\t%d", responseLength);
+
+    int status = esp_http_client_get_status_code(client);
+    ESP_LOGI(TAG, "status:\t%d", status);
+
+    if(responseLength)
+    {
+        if(esp_http_client_read(client, buffer, responseLength) == responseLength)
+            ESP_LOGI(TAG, "Response: %.*s", responseLength, buffer);
     }
 
-    if (msg->event_id == HTTP_STREAM_POST_REQUEST) {
-        ESP_LOGI(TAG, "[ + ] HTTP client HTTP_STREAM_POST_REQUEST, write end chunked marker");
-        if (esp_http_client_write(http, "0\r\n\r\n", 5) <= 0) {
-            return ESP_FAIL;
-        }
-        return ESP_OK;
+    err = esp_http_client_close(client);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to close HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
     }
+    return status == 200 || status == 409;
+}
 
-    if (msg->event_id == HTTP_STREAM_FINISH_REQUEST) {
-        ESP_LOGI(TAG, "[ + ] HTTP client HTTP_STREAM_FINISH_REQUEST");
-        char *buf = calloc(1, 254);
-        assert(buf);
-        int read_len = esp_http_client_read(http, buf, 254);
-        if (read_len <= 0) {
-            free(buf);
-            return ESP_FAIL;
-        }
-        buf[read_len] = 0;
-        ESP_LOGI(TAG, "Got HTTP Response = %s", (char *)buf);
-        free(buf);
-        return ESP_OK;
+esp_err_t _http_event_handle(esp_http_client_event_t *evt)
+{
+    switch(evt->event_id) {
+        case HTTP_EVENT_ERROR:
+            ESP_LOGI(TAG, "HTTP_EVENT_ERROR");
+            break;
+        case HTTP_EVENT_ON_CONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+            break;
+        case HTTP_EVENT_HEADER_SENT:
+            ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
+            break;
+        case HTTP_EVENT_ON_HEADER:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER");
+            printf("%.*s", evt->data_len, (char*)evt->data);
+            break;
+        case HTTP_EVENT_ON_DATA:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
+            if (!esp_http_client_is_chunked_response(evt->client)) {
+                printf("%.*s", evt->data_len, (char*)evt->data);
+            }
+
+            break;
+        case HTTP_EVENT_ON_FINISH:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
+            break;
+        case HTTP_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
+            break;
     }
     return ESP_OK;
 }
 
-static esp_err_t input_key_service_cb(periph_service_handle_t handle, periph_service_event_t *evt, void *ctx)
+static void https_send_file()
 {
-    audio_element_handle_t http_stream_writer = (audio_element_handle_t)ctx;
-    if (evt->type == INPUT_KEY_SERVICE_ACTION_CLICK) {
-        switch ((int)evt->data) {
-            case INPUT_KEY_USER_ID_MODE:
-                ESP_LOGW(TAG, "[ * ] [Set] input key event, exit the demo ...");
-                xEventGroupSetBits(EXIT_FLAG, DEMO_EXIT_BIT);
-                break;
-            case INPUT_KEY_USER_ID_REC:
-                if(streaming_state==0){
-                    streaming_state = 1;
-                    ESP_LOGI(TAG, "[ * ] [Rec] input key event, resuming pipeline ...");
-                    audio_element_set_uri(http_stream_writer, CONFIG_SERVER_URI);
-                    audio_pipeline_run(pipeline);
-                }else{
-                    ESP_LOGI(TAG, "[ * ] [Rec] input key event, last streaming is running ...");
-                }
-                break;
-        }
-    } else if (evt->type == INPUT_KEY_SERVICE_ACTION_CLICK_RELEASE || evt->type == INPUT_KEY_SERVICE_ACTION_PRESS_RELEASE) {
-        switch ((int)evt->data) {
-            case INPUT_KEY_USER_ID_REC:
-                ESP_LOGI(TAG, "[ * ] [Rec] key released, stop pipeline ...");
-                /*audio_pipeline_stop(pipeline);
-                audio_pipeline_wait_for_stop(pipeline);
-                audio_pipeline_stop(pipeline);
-                audio_pipeline_wait_for_stop(pipeline);
-                audio_pipeline_terminate(pipeline);*/
-                break;
-        }
+    //char url[200]= "http://192.168.1.51:8000/upload";
+    char url[200]= "http://5.160.218.105/AIBotHardware/";
+    ESP_LOGI(TAG, "url = %s", url);
+    esp_err_t err;
+    esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = _http_event_handle,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    ESP_LOGI(TAG, "client initialized");
+
+    err = esp_http_client_set_method(client, HTTP_METHOD_POST);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set method: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
     }
 
-    return ESP_OK;
+    //Set Multipart header
+    char contentTypeStr[50] = "multipart/form-data; boundary=";
+    strcat(contentTypeStr, HTTP_BOUNDARY);
+
+    err = esp_http_client_set_header(client, "Content-Type", contentTypeStr);
+    err = esp_http_client_set_header(client, "Accept", "*/*");
+    //err = esp_http_client_set_header(client, "Accept-Encoding", "gzip,deflate");
+    //err = esp_http_client_set_header(client, "Accept-Charset", "ISO-8859-1,utf-8;q=0.7,*;q=0.7");
+    //err = esp_http_client_set_header(client, "User-Agent", "Test");
+    //err = esp_http_client_set_header(client, "Keep-Alive", "300");
+    err = esp_http_client_set_header(client, "Connection", "keep-alive");
+    err = esp_http_client_set_header(client, "Accept-Language", "en-us");
+
+    char fileName[] = "ahang.wav";
+    ESP_LOGI(TAG, "sending file: %s", fileName);
+
+    sendFile(client, fileName);
+
+    err = esp_http_client_cleanup(client);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to clean HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+    }
+
+    //vTaskDelete(NULL);
+    return;
 }
 
-void app_main(void)
-{
-    audio_element_handle_t http_stream_writer, fatfs_stream_reader;
-
+void app_main(void){
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
-
-    EXIT_FLAG = xEventGroupCreate();
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES) {
@@ -152,7 +251,7 @@ void app_main(void)
     }
     tcpip_adapter_init();
 
-    ESP_LOGI(TAG, "[ 1 ] Initialize Button Peripheral & Connect to wifi network & SDCARD");
+    ESP_LOGI(TAG, "[ 1 ] Mount sdcard");
     // Initialize peripherals management
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
@@ -170,117 +269,10 @@ void app_main(void)
     // Initialize SD Card peripheral
     audio_board_sdcard_init(set);
 
-    /*ESP_LOGI(TAG, "[ 2 ] Start codec chip");
-    audio_board_handle_t board_handle = audio_board_init();
-    audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_ENCODE, AUDIO_HAL_CTRL_START);*/
-
-    ESP_LOGI(TAG, "[3.0] Create audio pipeline for reading from SDCARD");
-    audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
-    pipeline = audio_pipeline_init(&pipeline_cfg);
-    mem_assert(pipeline);
-
-    ESP_LOGI(TAG, "[3.1] Create http stream to post data to server");
-
-    http_stream_cfg_t http_cfg = HTTP_STREAM_CFG_DEFAULT();
-    http_cfg.type = AUDIO_STREAM_WRITER;
-    http_cfg.event_handle = _http_stream_event_handle;
-    http_stream_writer = http_stream_init(&http_cfg);
-
-    /*ESP_LOGI(TAG, "[3.2] Create i2s stream to read audio data from codec chip");
-    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
-    i2s_cfg.type = AUDIO_STREAM_READER;
-#if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-    i2s_cfg.i2s_port = 1;
-#endif
-    i2s_stream_reader = i2s_stream_init(&i2s_cfg);*/
-
-    ESP_LOGI(TAG, "[3.1] Create fatfs stream to read data from sdcard");
-    fatfs_stream_cfg_t fatfs_cfg = FATFS_STREAM_CFG_DEFAULT();
-    fatfs_cfg.type = AUDIO_STREAM_READER;
-    fatfs_stream_reader = fatfs_stream_init(&fatfs_cfg);
-
-    ESP_LOGI(TAG, "[3.3] Register all elements to audio pipeline");
-    audio_pipeline_register(pipeline, fatfs_stream_reader, "fatfs");
-    audio_pipeline_register(pipeline, http_stream_writer, "http");
-
-    ESP_LOGI(TAG, "[3.4] Link it together fatfs_stream->http_stream-->[http_server]");
-    const char *link_tag[2] = {"fatfs", "http"};
-    audio_pipeline_link(pipeline, &link_tag[0], 2);
-
-    ESP_LOGI(TAG, "[3.6] Set up  uri (file as fatfs_stream)");
-    audio_element_set_uri(fatfs_stream_reader, "/sdcard/test.wav");
-
-    // Initialize Button peripheral
-    audio_board_key_init(set);
-    input_key_service_info_t input_key_info[] = INPUT_KEY_DEFAULT_INFO();
-    input_key_service_cfg_t input_cfg = INPUT_KEY_SERVICE_DEFAULT_CONFIG();
-    input_cfg.handle = set;
-    periph_service_handle_t input_ser = input_key_service_create(&input_cfg);
-    input_key_service_add_key(input_ser, input_key_info, INPUT_KEY_NUM);
-    periph_service_set_callback(input_ser, input_key_service_cb, (void *)http_stream_writer);
-
-    //i2s_stream_set_clk(i2s_stream_reader, 16000, 16, 2);
-
-    ESP_LOGI(TAG, "[ 4 ] Press [Rec] button to start streaming, Press [Mode] to exit");
-    ESP_LOGI(TAG, "[ 4 ] ByPass");
-    streaming_state = 1;
-    audio_element_set_uri(http_stream_writer, CONFIG_SERVER_URI);
-    audio_pipeline_run(pipeline);
-
-    ESP_LOGI(TAG, "[ 4 ] Set up  event listener");
-    audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
-    audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
-
-    ESP_LOGI(TAG, "[4.1] Listening event from all elements of pipeline");
-    audio_pipeline_set_listener(pipeline, evt);
-
-    ESP_LOGI(TAG, "[4.2] Listening event from peripherals");
-    audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
-
-    //xEventGroupWaitBits(EXIT_FLAG, DEMO_EXIT_BIT, true, false, portMAX_DELAY);
-
-    while(1){
-
-        audio_event_iface_msg_t msg;
-        esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
-            continue;
-        }
-
-        /* Stop when the last pipeline element (http_stream_writer in this case) receives stop event */
-        if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *) http_stream_writer
-            && msg.cmd == AEL_MSG_CMD_REPORT_STATUS
-            && (((int)msg.data == AEL_STATUS_STATE_STOPPED) || ((int)msg.data == AEL_STATUS_STATE_FINISHED))) {
-            ESP_LOGW(TAG, "[ * ] Stop event received");
-            ESP_LOGW(TAG, "[ * ] Press REC again!");
-            /*audio_pipeline_stop(pipeline);
-            audio_pipeline_wait_for_stop(pipeline);
-            audio_pipeline_stop(pipeline);
-            audio_pipeline_wait_for_stop(pipeline);
-            audio_pipeline_terminate(pipeline);
-            streaming_state = 0;*/
-	    break;
-        }
-    }
-
-    ESP_LOGI(TAG, "[ 5 ] Stop audio_pipeline");
-    audio_pipeline_stop(pipeline);
-    audio_pipeline_wait_for_stop(pipeline);
-    audio_pipeline_terminate(pipeline);
-
-    audio_pipeline_unregister(pipeline, http_stream_writer);
-    audio_pipeline_unregister(pipeline, fatfs_stream_reader);
-
-    /* Terminal the pipeline before removing the listener */
-    audio_pipeline_remove_listener(pipeline);
+    https_send_file();
 
     /* Stop all periph before removing the listener */
     esp_periph_set_stop_all(set);
-
-    /* Release all resources */
-    audio_pipeline_deinit(pipeline);
-    audio_element_deinit(http_stream_writer);
-    audio_element_deinit(fatfs_stream_reader);
     esp_periph_set_destroy(set);
 }
+

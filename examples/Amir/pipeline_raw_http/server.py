@@ -1,7 +1,7 @@
 import os, datetime, sys, urlparse
 import SimpleHTTPServer, BaseHTTPServer
 import wave
-
+import cgi
 PORT = 8000
 HOST = '0.0.0.0'
 
@@ -42,6 +42,33 @@ class Handler(SimpleHTTPServer.SimpleHTTPRequestHandler):
         sample_rates = 0
         bits = 0
         channel = 0
+	print(self.headers)
+	ctype, pdict = cgi.parse_header(self.headers['Content-Type'])
+	print(pdict)
+        if ctype == 'multipart/form-data':
+            #print(self.headers)
+            pdict['boundary'] = bytes(pdict['boundary']).encode('utf-8')
+            fields = cgi.parse_multipart(self.rfile, pdict)
+            #print(fields)
+            messagecontent = fields.get('file')[0]#.decode('utf-8')
+            print(len(messagecontent))
+        else:
+            return SimpleHTTPRequestHandler.do_GET(self)
+        output = ''
+        output += '<html><body>'
+        output += '<h2> Okay, how about this: </h2>'
+        output += '<h1> OK </h1>'#% messagecontent
+        output += "<form method='POST' enctype='multipart/form-data' action='/hello'><h2>What would you like me to say?</h2><input name='message' type='text'><input type='submit' value='Submit'></form>"
+        output += '</html></body>'
+        self._set_headers(len(output))
+        #self.wfile.write(body)
+        self.wfile.write(output.encode('utf-8'))
+	
+	if len(messagecontent)>0:
+            with open("out.wav",mode='w') as f:
+                f.write(messagecontent)
+	
+	"""
         if (request_file_path == 'upload' and self.headers.get('Transfer-Encoding', '').lower() == 'chunked'):
             data = []
             sample_rates = 16000#self.headers.get('x-audio-sample-rates', '').lower()
@@ -69,7 +96,7 @@ class Handler(SimpleHTTPServer.SimpleHTTPRequestHandler):
             self.wfile.close()
         else:
             return SimpleHTTPServer.SimpleHTTPRequestHandler.do_GET(self)
-
+	"""
 httpd = BaseHTTPServer.HTTPServer((HOST, PORT), Handler)
 
 print("Serving HTTP on {} port {}".format(HOST, PORT));
