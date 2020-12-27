@@ -16,15 +16,18 @@
 #include "audio_common.h"
 #include "audio_pipeline.h"
 #include "i2s_stream.h"
+#include "wav_encoder.h"
+#include "fatfs_stream.h"
 #include "raw_stream.h"
 #include "filter_resample.h"
 #include "esp_vad.h"
 
 static const char *TAG = "EXAMPLE-VAD";
 
-#define VAD_SAMPLE_RATE_HZ 16000
-#define VAD_FRAME_LENGTH_MS 30
-#define VAD_BUFFER_LENGTH 4*1024//(VAD_FRAME_LENGTH_MS * VAD_SAMPLE_RATE_HZ / 1000)
+#define VAD_SAMPLE_RATE_HZ 	16000
+#define VAD_FRAME_LENGTH_MS 	30
+#define VAD_BUFFER_LENGTH 	(VAD_FRAME_LENGTH_MS * VAD_SAMPLE_RATE_HZ / 1000)
+#define MIDDLE_BUFFER_LENGTH	4*1024
 
 void app_main()
 {
@@ -33,7 +36,15 @@ void app_main()
 
     audio_pipeline_handle_t pipeline1, pipeline2;
     audio_element_handle_t i2s_stream_reader, filter, raw_read;
-    audio_element_handle_t i2s_stream_writer, raw_write;
+    audio_element_handle_t raw_writer, wav_encoder, fatfs_stream_writer;
+
+    ESP_LOGI(TAG, "[ 1 ] Mount sdcard");
+    // Initialize peripherals management
+    esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
+    esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
+
+    // Initialize SD Card peripheral
+    audio_board_sdcard_init(set);
 
     ESP_LOGI(TAG, "[ 1 ] Start codec chip");
     audio_board_handle_t board_handle = audio_board_init();
@@ -58,14 +69,14 @@ void app_main()
 #endif
     i2s_stream_reader = i2s_stream_init(&i2s_cfg1);
 
-    ESP_LOGI(TAG, "[2.1] Create i2s stream to play audio data in codec chip");
+    /*ESP_LOGI(TAG, "[2.1] Create i2s stream to play audio data in codec chip");
     i2s_stream_cfg_t i2s_cfg2 = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg2.i2s_config.sample_rate = 16000;
     i2s_cfg2.type = AUDIO_STREAM_WRITER;
 #if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
     i2s_cfg2.i2s_port = 1;
 #endif
-    i2s_stream_writer = i2s_stream_init(&i2s_cfg2);
+    i2s_stream_writer = i2s_stream_init(&i2s_cfg2);*/
 
     /*ESP_LOGI(TAG, "[2.2] Create filter to resample audio data");
     rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
@@ -74,17 +85,25 @@ void app_main()
     rsp_cfg.dest_rate = VAD_SAMPLE_RATE_HZ;
     rsp_cfg.dest_ch = 1;
     filter = rsp_filter_init(&rsp_cfg);*/
+    
+    fatfs_stream_cfg_t fatfs_cfg = FATFS_STREAM_CFG_DEFAULT();
+    fatfs_cfg.type = AUDIO_STREAM_WRITER;
+    fatfs_stream_writer = fatfs_stream_init(&fatfs_cfg);
+
+    ESP_LOGI(TAG, "[3.3] Create wav encoder to encode wav file");
+    wav_encoder_cfg_t wav_cfg = DEFAULT_WAV_ENCODER_CONFIG();
+    wav_encoder = wav_encoder_init(&wav_cfg);
 
     ESP_LOGI(TAG, "[2.3] Create raw to receive data");
     raw_stream_cfg_t raw_cfg1 = {
-        .out_rb_size = VAD_BUFFER_LENGTH*2,//8 * 1024,
+        .out_rb_size = MIDDLE_BUFFER_LENGTH*2,//8 * 1024,
         .type = AUDIO_STREAM_READER,
     };
     raw_read = raw_stream_init(&raw_cfg1);
 
     ESP_LOGI(TAG, "[2.3] Create raw to send data");
     raw_stream_cfg_t raw_cfg2 = {
-        .out_rb_size = VAD_BUFFER_LENGTH*2,//8 * 1024,
+        .out_rb_size = MIDDLE_BUFFER_LENGTH*2,//8 * 1024,
         .type = AUDIO_STREAM_WRITER,
     };
     raw_write = raw_stream_init(&raw_cfg2);
@@ -96,15 +115,17 @@ void app_main()
 
     ESP_LOGI(TAG, "[ 3 ] Register all elements to audio pipeline2");
     audio_pipeline_register(pipeline2, raw_write, "raw");
-    audio_pipeline_register(pipeline2, i2s_stream_writer, "i2s");
+    audio_pipeline_register(pipeline2, wav_encoder, "wav");
+    audio_pipeline_register(pipeline2, fatfs_stream_writer, "fatfs");
+
 
     ESP_LOGI(TAG, "[ 4 ] Link elements together [codec_chip]-->i2s_stream-->raw");
     const char *link_tag1[2] = {"i2s", "raw"};
     audio_pipeline_link(pipeline1, &link_tag1[0], 2);
 
-    ESP_LOGI(TAG, "[ 4 ] Link elements together raw-->i2s_stream-->[codec_chip]");
-    const char *link_tag2[2] = {"raw", "i2s"};
-    audio_pipeline_link(pipeline2, &link_tag2[0], 2);
+    ESP_LOGI(TAG, "[ 4 ] Link elements together raw-->wav-->fatfs");
+    const char *link_tag2[3] = {"raw", "wav", "fatfs"};
+    audio_pipeline_link(pipeline2, &link_tag2[0], 3);
 
     ESP_LOGI(TAG, "[ 5 ] Start audio_pipeline");
     audio_pipeline_run(pipeline1);
@@ -119,14 +140,21 @@ void app_main()
         goto abort_speech_detection;
     }
 
+    int16_t *middle_buff = (int16_t *)malloc(MIDDLE_BUFFER_LENGTH * sizeof(short));
+    if (vad_buff == NULL) {
+        ESP_LOGE(TAG, "Memory allocation failed!");
+        goto abort_speech_detection;
+    }
+
     while (1) {
-        raw_stream_read(raw_read, (char *)vad_buff, VAD_BUFFER_LENGTH * sizeof(short));
-        raw_stream_write(raw_write, (char *)vad_buff, VAD_BUFFER_LENGTH * sizeof(short));
+        raw_stream_read(raw_read, (char *)middle_buff, VAD_BUFFER_LENGTH * sizeof(short));
+        //raw_stream_write(raw_write, (char *)vad_buff, VAD_BUFFER_LENGTH * sizeof(short));
         // Feed samples to the VAD process and get the result
-        /*vad_state_t vad_state = vad_process(vad_inst, vad_buff);
+        vad_state_t vad_state = vad_process(vad_inst, vad_middle);
         if (vad_state == VAD_SPEECH) {
             ESP_LOGI(TAG, "Speech detected");
-        }*/
+	    raw_stream_write(raw_write, (char *)middle_buff, VAD_BUFFER_LENGTH * sizeof(short));
+        }
     }
 
     free(vad_buff);
@@ -151,21 +179,21 @@ abort_speech_detection:
     audio_pipeline_remove_listener(pipeline2);
 
     audio_pipeline_unregister(pipeline1, i2s_stream_reader);
-    audio_pipeline_unregister(pipeline1, filter);
+    //audio_pipeline_unregister(pipeline1, filter);
     audio_pipeline_unregister(pipeline1, raw_read);
 
     audio_pipeline_unregister(pipeline2, raw_write);
-    audio_pipeline_unregister(pipeline2, i2s_stream_writer);
+    //audio_pipeline_unregister(pipeline2, i2s_stream_writer);
 
     /* Release all resources */
     audio_pipeline_deinit(pipeline1);
     audio_element_deinit(i2s_stream_reader);
-    audio_element_deinit(filter);
+    //audio_element_deinit(filter);
     audio_element_deinit(raw_read);
 
     audio_pipeline_deinit(pipeline2);
     audio_element_deinit(raw_write);
-    audio_element_deinit(i2s_stream_writer);
-
+    //audio_element_deinit(i2s_stream_writer);
+    
 }
 
