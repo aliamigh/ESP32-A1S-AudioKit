@@ -51,7 +51,7 @@ void app_main()
 
     ESP_LOGI(TAG, "[2.1] Create i2s stream to read audio data from codec chip");
     i2s_stream_cfg_t i2s_cfg1 = I2S_STREAM_CFG_DEFAULT();
-    i2s_cfg1.i2s_config.sample_rate = 48000;
+    i2s_cfg1.i2s_config.sample_rate = 16000;
     i2s_cfg1.type = AUDIO_STREAM_READER;
 #if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
     i2s_cfg1.i2s_port = 1;
@@ -77,14 +77,14 @@ void app_main()
 
     ESP_LOGI(TAG, "[2.3] Create raw to receive data");
     raw_stream_cfg_t raw_cfg1 = {
-        .out_rb_size = 8 * 1024,
+        .out_rb_size = VAD_BUFFER_LENGTH*2,//8 * 1024,
         .type = AUDIO_STREAM_READER,
     };
     raw_read = raw_stream_init(&raw_cfg1);
 
     ESP_LOGI(TAG, "[2.3] Create raw to send data");
     raw_stream_cfg_t raw_cfg2 = {
-        .out_rb_size = 8 * 1024,
+        .out_rb_size = VAD_BUFFER_LENGTH*2,//8 * 1024,
         .type = AUDIO_STREAM_WRITER,
     };
     raw_write = raw_stream_init(&raw_cfg2);
