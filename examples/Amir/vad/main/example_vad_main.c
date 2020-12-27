@@ -24,7 +24,7 @@ static const char *TAG = "EXAMPLE-VAD";
 
 #define VAD_SAMPLE_RATE_HZ 16000
 #define VAD_FRAME_LENGTH_MS 30
-#define VAD_BUFFER_LENGTH (VAD_FRAME_LENGTH_MS * VAD_SAMPLE_RATE_HZ / 1000)
+#define VAD_BUFFER_LENGTH 4*1024//(VAD_FRAME_LENGTH_MS * VAD_SAMPLE_RATE_HZ / 1000)
 
 void app_main()
 {
@@ -67,13 +67,13 @@ void app_main()
 #endif
     i2s_stream_writer = i2s_stream_init(&i2s_cfg2);
 
-    ESP_LOGI(TAG, "[2.2] Create filter to resample audio data");
+    /*ESP_LOGI(TAG, "[2.2] Create filter to resample audio data");
     rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
     rsp_cfg.src_rate = 48000;
     rsp_cfg.src_ch = 2;
     rsp_cfg.dest_rate = VAD_SAMPLE_RATE_HZ;
     rsp_cfg.dest_ch = 1;
-    filter = rsp_filter_init(&rsp_cfg);
+    filter = rsp_filter_init(&rsp_cfg);*/
 
     ESP_LOGI(TAG, "[2.3] Create raw to receive data");
     raw_stream_cfg_t raw_cfg1 = {
@@ -91,19 +91,19 @@ void app_main()
 
     ESP_LOGI(TAG, "[ 3 ] Register all elements to audio pipeline1");
     audio_pipeline_register(pipeline1, i2s_stream_reader, "i2s");
-    audio_pipeline_register(pipeline1, filter, "filter");
+    //audio_pipeline_register(pipeline1, filter, "filter");
     audio_pipeline_register(pipeline1, raw_read, "raw");
 
     ESP_LOGI(TAG, "[ 3 ] Register all elements to audio pipeline2");
     audio_pipeline_register(pipeline2, raw_write, "raw");
     audio_pipeline_register(pipeline2, i2s_stream_writer, "i2s");
 
-    ESP_LOGI(TAG, "[ 4 ] Link elements together [codec_chip]-->i2s_stream-->filter-->raw-->[VAD]");
-    const char *link_tag1[3] = {"i2s", "filter", "raw"};
-    audio_pipeline_link(pipeline1, &link_tag1[0], 3);
+    ESP_LOGI(TAG, "[ 4 ] Link elements together [codec_chip]-->i2s_stream-->raw");
+    const char *link_tag1[2] = {"i2s", "raw"};
+    audio_pipeline_link(pipeline1, &link_tag1[0], 2);
 
     ESP_LOGI(TAG, "[ 4 ] Link elements together raw-->i2s_stream-->[codec_chip]");
-    const char *link_tag2[2] = {"raw","i2s"};
+    const char *link_tag2[2] = {"raw", "i2s"};
     audio_pipeline_link(pipeline2, &link_tag2[0], 2);
 
     ESP_LOGI(TAG, "[ 5 ] Start audio_pipeline");
