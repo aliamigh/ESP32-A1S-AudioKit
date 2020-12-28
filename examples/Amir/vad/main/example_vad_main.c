@@ -27,7 +27,8 @@ static const char *TAG = "EXAMPLE-VAD";
 #define VAD_SAMPLE_RATE_HZ 	16000
 #define VAD_FRAME_LENGTH_MS 	30
 #define VAD_BUFFER_LENGTH 	(VAD_FRAME_LENGTH_MS * VAD_SAMPLE_RATE_HZ / 1000)
-#define MIDDLE_BUFFER_LENGTH	4*1024
+// #define MIDDLE_BUFFER_LENGTH	50*1024
+#define MIDDLE_BUFFER_LENGTH	VAD_BUFFER_LENGTH*102
 
 void app_main()
 {
@@ -36,7 +37,7 @@ void app_main()
 
     audio_pipeline_handle_t pipeline1, pipeline2;
     audio_element_handle_t i2s_stream_reader, filter, raw_read;
-    audio_element_handle_t raw_writer, wav_encoder, fatfs_stream_writer;
+    audio_element_handle_t raw_write, wav_encoder, fatfs_stream_writer;
 
     ESP_LOGI(TAG, "[ 1 ] Mount sdcard");
     // Initialize peripherals management
@@ -94,6 +95,14 @@ void app_main()
     wav_encoder_cfg_t wav_cfg = DEFAULT_WAV_ENCODER_CONFIG();
     wav_encoder = wav_encoder_init(&wav_cfg);
 
+
+
+
+    audio_element_info_t info = AUDIO_ELEMENT_INFO_DEFAULT();
+    audio_element_getinfo(i2s_stream_reader, &info);
+    audio_element_setinfo(fatfs_stream_writer, &info);
+
+
     ESP_LOGI(TAG, "[2.3] Create raw to receive data");
     raw_stream_cfg_t raw_cfg1 = {
         .out_rb_size = MIDDLE_BUFFER_LENGTH*2,//8 * 1024,
@@ -113,19 +122,28 @@ void app_main()
     //audio_pipeline_register(pipeline1, filter, "filter");
     audio_pipeline_register(pipeline1, raw_read, "raw");
 
+    ESP_LOGI(TAG, "[ 4 ] Link elements together [codec_chip]-->i2s_stream-->raw");
+    const char *link_tag1[2] = {"i2s", "raw"};
+    audio_pipeline_link(pipeline1, &link_tag1[0], 2);
+
+
+
+
+
     ESP_LOGI(TAG, "[ 3 ] Register all elements to audio pipeline2");
     audio_pipeline_register(pipeline2, raw_write, "raw");
     audio_pipeline_register(pipeline2, wav_encoder, "wav");
     audio_pipeline_register(pipeline2, fatfs_stream_writer, "fatfs");
 
 
-    ESP_LOGI(TAG, "[ 4 ] Link elements together [codec_chip]-->i2s_stream-->raw");
-    const char *link_tag1[2] = {"i2s", "raw"};
-    audio_pipeline_link(pipeline1, &link_tag1[0], 2);
-
     ESP_LOGI(TAG, "[ 4 ] Link elements together raw-->wav-->fatfs");
     const char *link_tag2[3] = {"raw", "wav", "fatfs"};
     audio_pipeline_link(pipeline2, &link_tag2[0], 3);
+
+
+    audio_element_set_uri(fatfs_stream_writer, "/sdcard/rec_out.wav");
+
+
 
     ESP_LOGI(TAG, "[ 5 ] Start audio_pipeline");
     audio_pipeline_run(pipeline1);
@@ -134,31 +152,74 @@ void app_main()
     ESP_LOGI(TAG, "[ 6 ] Initialize VAD handle");
     vad_handle_t vad_inst = vad_create(VAD_MODE_4, VAD_SAMPLE_RATE_HZ, VAD_FRAME_LENGTH_MS);
 
-    int16_t *vad_buff = (int16_t *)malloc(VAD_BUFFER_LENGTH * sizeof(short));
+/*    int16_t *vad_buff = (int16_t *)malloc(VAD_BUFFER_LENGTH * sizeof(short));
     if (vad_buff == NULL) {
         ESP_LOGE(TAG, "Memory allocation failed!");
         goto abort_speech_detection;
-    }
+    }*/
 
     int16_t *middle_buff = (int16_t *)malloc(MIDDLE_BUFFER_LENGTH * sizeof(short));
-    if (vad_buff == NULL) {
+    if (middle_buff == NULL) {
         ESP_LOGE(TAG, "Memory allocation failed!");
         goto abort_speech_detection;
     }
-
+    int start_record =0;
+vad_state_t vad_state;
     while (1) {
-        raw_stream_read(raw_read, (char *)middle_buff, VAD_BUFFER_LENGTH * sizeof(short));
-        //raw_stream_write(raw_write, (char *)vad_buff, VAD_BUFFER_LENGTH * sizeof(short));
-        // Feed samples to the VAD process and get the result
-        vad_state_t vad_state = vad_process(vad_inst, vad_middle);
-        if (vad_state == VAD_SPEECH) {
-            ESP_LOGI(TAG, "Speech detected");
-	    raw_stream_write(raw_write, (char *)middle_buff, VAD_BUFFER_LENGTH * sizeof(short));
-        }
-    }
+        raw_stream_read(raw_read, (char *)middle_buff, VAD_BUFFER_LENGTH* sizeof(short));
+            ESP_LOGW(TAG, "raw_stream_read");
+               vad_state = vad_process(vad_inst, middle_buff);
+            if (vad_state == VAD_SPEECH) {
+                ESP_LOGI(TAG, "Speech detected");
+        		raw_stream_read(raw_read,  (char *)middle_buff + VAD_BUFFER_LENGTH*start_record, VAD_BUFFER_LENGTH * sizeof(short));
+                start_record++;
+                if(start_record>3)
+                	break;
+            }
 
-    free(vad_buff);
-    vad_buff = NULL;
+        }
+
+        for(;start_record<100;start_record++){
+
+        	raw_stream_read(raw_read,  (char *)middle_buff + VAD_BUFFER_LENGTH*start_record, VAD_BUFFER_LENGTH * sizeof(short));
+            ESP_LOGW(TAG, "raw_stream_read/.//////////////////");
+        }
+
+        for(start_record=0;start_record<100;start_record++){
+
+        	raw_stream_write(raw_write, (char *)middle_buff+ VAD_BUFFER_LENGTH*start_record, VAD_BUFFER_LENGTH * sizeof(short));
+            ESP_LOGW(TAG, "raw_stream_write/.//////////////////");
+        }
+
+        // Feed samples to the VAD process and get the result
+        // if(start_record<2){
+        //    vad_state = vad_process(vad_inst, middle_buff);
+        // }
+        // if (vad_state == VAD_SPEECH) {
+        //     ESP_LOGI(TAG, "Speech detected");
+        //      start_record +=1;
+        // }
+        // else{
+        //     ESP_LOGW(TAG, "SILENCE");
+
+        // }
+
+        // if(start_record > 100) {
+        //     ESP_LOGI(TAG, "FINISH recording");
+        //     break;
+        // }
+// start_record++;
+// 	       raw_stream_write(raw_write, (char *)middle_buff, VAD_BUFFER_LENGTH * sizeof(short));
+//             ESP_LOGI(TAG, "raw_stream_write");
+
+//         if(start_record>5){
+//            // raw_stream_write(raw_write, (char *)middle_buff, VAD_BUFFER_LENGTH * sizeof(short));
+//             break;
+//         }
+//     }
+
+    free(middle_buff);
+    middle_buff = NULL;
 
 abort_speech_detection:
 
