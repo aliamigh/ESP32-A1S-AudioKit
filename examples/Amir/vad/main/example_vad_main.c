@@ -26,9 +26,10 @@ static const char *TAG = "EXAMPLE-VAD";
 
 #define VAD_SAMPLE_RATE_HZ 	16000
 #define VAD_FRAME_LENGTH_MS 	30
-#define VAD_BUFFER_LENGTH 	(VAD_FRAME_LENGTH_MS * VAD_SAMPLE_RATE_HZ / 1000)
+#define VAD_BUFFER_LENGTH 	(VAD_FRAME_LENGTH_MS * VAD_SAMPLE_RATE_HZ / 1000) //480
 // #define MIDDLE_BUFFER_LENGTH	50*1024
-#define MIDDLE_BUFFER_LENGTH	VAD_BUFFER_LENGTH*102
+#define SEQUNCE_BUFF 			70
+#define MIDDLE_BUFFER_LENGTH	VAD_BUFFER_LENGTH*SEQUNCE_BUFF
 
 void app_main()
 {
@@ -65,9 +66,12 @@ void app_main()
     i2s_stream_cfg_t i2s_cfg1 = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg1.i2s_config.sample_rate = 16000;
     i2s_cfg1.type = AUDIO_STREAM_READER;
-#if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-    i2s_cfg1.i2s_port = 1;
-#endif
+
+   	i2s_cfg1.multi_out_num = 1;
+    i2s_cfg1.task_core = 1;
+    i2s_cfg1.i2s_config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+
+
     i2s_stream_reader = i2s_stream_init(&i2s_cfg1);
 
     /*ESP_LOGI(TAG, "[2.1] Create i2s stream to play audio data in codec chip");
@@ -159,6 +163,7 @@ void app_main()
     }*/
 
     int16_t *middle_buff = (int16_t *)malloc(MIDDLE_BUFFER_LENGTH * sizeof(short));
+    memset(middle_buff,0,MIDDLE_BUFFER_LENGTH * sizeof(short));
     if (middle_buff == NULL) {
         ESP_LOGE(TAG, "Memory allocation failed!");
         goto abort_speech_detection;
@@ -179,13 +184,13 @@ vad_state_t vad_state;
 
         }
 
-        for(;start_record<100;start_record++){
+        for(;start_record<SEQUNCE_BUFF;start_record++){
 
         	raw_stream_read(raw_read,  (char *)middle_buff + VAD_BUFFER_LENGTH*start_record, VAD_BUFFER_LENGTH * sizeof(short));
             ESP_LOGW(TAG, "raw_stream_read/.//////////////////");
         }
 
-        for(start_record=0;start_record<100;start_record++){
+        for(start_record=0;start_record<SEQUNCE_BUFF;start_record++){
 
         	raw_stream_write(raw_write, (char *)middle_buff+ VAD_BUFFER_LENGTH*start_record, VAD_BUFFER_LENGTH * sizeof(short));
             ESP_LOGW(TAG, "raw_stream_write/.//////////////////");
@@ -218,8 +223,6 @@ vad_state_t vad_state;
 //         }
 //     }
 
-    free(middle_buff);
-    middle_buff = NULL;
 
 abort_speech_detection:
 
@@ -254,6 +257,9 @@ abort_speech_detection:
 
     audio_pipeline_deinit(pipeline2);
     audio_element_deinit(raw_write);
+    
+    // free(middle_buff);
+    // middle_buff = NULL;
     //audio_element_deinit(i2s_stream_writer);
     
 }
