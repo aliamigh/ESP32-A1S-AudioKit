@@ -94,7 +94,12 @@ void app_main()
         // Feed samples to the VAD process and get the result
         vad_state_t vad_state = vad_process(vad_inst, vad_buff);
         if (vad_state == VAD_SPEECH) {
-            ESP_LOGI(TAG, "Speech detected");
+            ESP_LOGW(TAG, "Speech detected");
+        }
+        else
+        {
+
+            ESP_LOGI(TAG, "SILENCE");
         }
     }
 

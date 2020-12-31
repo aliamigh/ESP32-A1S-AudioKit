@@ -166,5 +166,6 @@ esp_err_t ac101_set_voice_mute(bool enable);
 esp_err_t ac101_set_voice_volume(int volume);
 esp_err_t ac101_get_voice_volume(int* volume);
 void ac101_pa_power(bool enable);
-
+uint16_t ac101_read_reg(uint8_t reg_addr);
+esp_err_t ac101_write_reg(uint8_t reg_addr, uint16_t val);
 #endif

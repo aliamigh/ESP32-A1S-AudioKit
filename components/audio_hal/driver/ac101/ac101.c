@@ -34,7 +34,7 @@ audio_hal_func_t AUDIO_CODEC_AC101_CODEC_HANDLE = {
 		return b;                             \
 	}
 
-static esp_err_t ac101_write_reg(uint8_t reg_addr, uint16_t val)
+esp_err_t ac101_write_reg(uint8_t reg_addr, uint16_t val)
 {
 	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
 	esp_err_t ret = 0;
@@ -70,7 +70,7 @@ static esp_err_t i2c_example_master_read_slave(uint8_t DevAddr, uint8_t reg, uin
 	return ret;
 }
 
-static uint16_t ac101_read_reg(uint8_t reg_addr)
+uint16_t ac101_read_reg(uint8_t reg_addr)
 {
 	uint16_t val = 0;
 	uint8_t data_rd[2];
